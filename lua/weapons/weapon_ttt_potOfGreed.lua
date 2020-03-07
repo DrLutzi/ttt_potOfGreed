@@ -1,5 +1,5 @@
 if SERVER then
-   AddCSLuaFile( "weapon_ttt_potOfGreed.lua" )
+   AddCSLuaFile()
 end
 
 if CLIENT then
