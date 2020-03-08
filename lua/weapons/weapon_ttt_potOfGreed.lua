@@ -63,7 +63,8 @@ function SWEP:WasBought(buyer)
 		conVarValues.nbItemsToGive = 	GetConVar("ttt_potOfGreed_nbItemsToGive"):GetInt()
 		conVarValues.conflictPolicy = 	GetConVar("ttt_potOfGreed_conflictPolicy"):GetInt()
 		
-		local equipmentTable=GetShopFallbackTable(subrole)
+		local rd = roles.GetByIndex(subrole)
+		local equipmentTable=rd.fallbackTable
 		local buyableItemTable = {}
 --		PrintMessage(HUD_PRINTTALK, tostring(#equipmentTable))
 		for i = 1, #equipmentTable do
