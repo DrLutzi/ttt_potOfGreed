@@ -53,6 +53,19 @@ if SERVER then
 											0, 2)
 end
 
+local function Give(player, itemClassName)
+	local is_item = items.IsItem(itemClassName)
+	if is_item then
+		player:GiveEquipmentItem(itemClassName)
+	else
+		player:GiveEquipmentWeapon(itemClassName, function(p, c, w)
+			if isfunction(w.WasBought) then
+					w:WasBought(p)
+				end
+			end)
+	end
+end
+
 -- Function of the item
 function SWEP:WasBought(buyer)
 	if not IsValid(buyer) then return end
@@ -66,20 +79,17 @@ function SWEP:WasBought(buyer)
 		local rd = roles.GetByIndex(subrole)
 		local equipmentTable=rd.fallbackTable
 		local buyableItemTable = {}
---		PrintMessage(HUD_PRINTTALK, tostring(#equipmentTable))
 		for i = 1, #equipmentTable do
 			if not 	equipmentTable[i].notBuyable and equipmentTable[i].id ~= "weapon_ttt_potofgreed" then
 				table.insert(buyableItemTable, equipmentTable[i])
 			end
 		end
---		PrintMessage(HUD_PRINTTALK, tostring(#buyableItemTable))
 		for i=1, conVarValues.nbItemsToGive do
 			if #buyableItemTable ~= 0 then
 				local itemIndex = math.random(1, #buyableItemTable)
---				PrintMessage(HUD_PRINTTALK, tostring(buyableItemTable[itemIndex].id))
-				local itemToGiveClass = buyableItemTable[itemIndex].ClassName
+				local itemClassName = buyableItemTable[itemIndex].ClassName
 				if conVarValues.conflictPolicy == 0 then --"do nothing" case...
-					buyer:Give(itemToGiveClass)
+					Give(buyer, itemClassName)
 				elseif conVarValues.conflictPolicy == 1 then --"override" case...
 					local newSlot = buyableItemTable[itemIndex].kind
 					if newSlot < 7 then --I think all items under 7 are unique?
@@ -89,8 +99,8 @@ function SWEP:WasBought(buyer)
 								buyer:StripWeapon(inventoryItem:GetClass())
 							end
 						end
-					end -- TODO: case for newSlot >= 7
-					buyer:Give(itemToGiveClass)
+					end
+					Give(buyer, itemClassName)
 				elseif conVarValues.conflictPolicy == 2 then
 					local newSlot = buyableItemTable[itemIndex].kind
 					if newSlot < 7 then --I think all items under 7 are unique?
@@ -99,7 +109,7 @@ function SWEP:WasBought(buyer)
 							if inventoryItem:GetSlot() == newSlot then 
 								buyer:StripWeapon(inventoryItem:GetClass())
 							end
-							buyer:Give(itemToGiveClass)
+							Give(buyer, itemClassName)
 							local updatedBuyableItemTable = {}
 							for k2, buyableItem in pairs(buyableItemTable) do
 								if buyableItem:GetSlot() ~= newSlot then
@@ -109,8 +119,8 @@ function SWEP:WasBought(buyer)
 							buyableItemTable = updatedBuyableItemTable
 						end
 					else
-						buyer:Give(itemToGiveClass)
-					end -- TODO: case for newSlot >= 7
+						Give(buyer, itemClassName)
+					end
 				end
 				table.remove(buyableItemTable, itemIndex)
 			end
