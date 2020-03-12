@@ -42,15 +42,19 @@ if SERVER then
 											"Determines the number of random items given by the item ttt_potOfGreed.",
 											1, nil)
 	--	Conflict policy: determines what to do when an item received takes the same slot as an item is already in the inventory.
+	--	So far, the conflict policy for items of slot number >6 is 0 unless specified otherwise. 
+	--	The ideal is to buy the pot of greed first if you want it, so you don't lose items!
 	--		0 - do nothing. The new item is lost.
 	--		1 - override the current item. The user may still lose items if several items taking the same slot are obtained.
 	--		2 - override the current item, and prevent next given items from overriding this new item.
+	--		3 - avoid needing to override the current item by preventing the pot from giving the same kind (not recommended).
 	-- 	Changing this ConVar might be a way to balance the item if it is judged too weak or too strong:
 	--	Using either 0 or 1 may result in players sometimes getting less items from the pot of greed;
 	--	however, this can result in a frustrating outcome for players and severly penalize them over "bad RNG".
+	--	On the other hand, using 3 enables users to manipulate what items they will not get.
 	conVars.conflictPolicy = CreateConVar(	"ttt_potOfGreed_conflictPolicy", "2", {FCVAR_NOTIFY, FCVAR_ARCHIVE}, 
 											"Determines the policy of the item ttt_potOfGreed when conflicts happen.",
-											0, 2)
+											0, 3)
 end
 
 local function Give(player, itemClassName)
@@ -59,10 +63,33 @@ local function Give(player, itemClassName)
 		player:GiveEquipmentItem(itemClassName)
 	else
 		player:GiveEquipmentWeapon(itemClassName, function(p, c, w)
-			if isfunction(w.WasBought) then
+				if isfunction(w.WasBought) then
 					w:WasBought(p)
 				end
 			end)
+	end
+end
+
+local function UpdateEquipmentTable(equipmentTable, func_update)
+	if isfunction(func_update) then
+		newEquipmentTable = {}
+		for i = 1, #equipmentTable do
+			if func_update(equipmentTable[i]) then
+				table.insert(newEquipmentTable, equipmentTable[i])
+			end
+		end
+		return newEquipmentTable
+	end
+end
+
+local function StripOldWeapon(buyer, newItemKind)
+	if newItemKind < 7 then --I think all items under 7 are unique?
+		local inventoryTable=buyer:GetWeapons()
+		for k, inventoryItem in pairs(inventoryTable) do
+			if inventoryItem.kind == newItemKind then 
+				buyer:StripWeapon(inventoryItem:GetClass())
+			end
+		end
 	end
 end
 
@@ -79,50 +106,48 @@ function SWEP:WasBought(buyer)
 		local rd = roles.GetByIndex(subrole)
 		local equipmentTable=rd.fallbackTable
 		local buyableItemTable = {}
-		for i = 1, #equipmentTable do
-			if not 	equipmentTable[i].notBuyable and equipmentTable[i].id ~= "weapon_ttt_potofgreed" then
-				table.insert(buyableItemTable, equipmentTable[i])
-			end
+		if(conVarValues.conflictPolicy == 3) then
+			local inventoryTable=buyer:GetWeapons()
+			buyableItemTable = UpdateEquipmentTable(equipmentTable, function(equipment)
+					for k, inventoryItem in pairs(inventoryTable) do
+						if inventoryItem.kind == equipment.kind then 
+							return false
+						end
+					end
+					return not equipment.notBuyable and equipment.id ~= "weapon_ttt_potofgreed"
+				end)
+		else
+			buyableItemTable = UpdateEquipmentTable(equipmentTable, function(equipment)
+					return not equipment.notBuyable and equipment.id ~= "weapon_ttt_potofgreed"
+				end)
 		end
 		for i=1, conVarValues.nbItemsToGive do
 			if #buyableItemTable ~= 0 then
 				local itemIndex = math.random(1, #buyableItemTable)
 				local itemClassName = buyableItemTable[itemIndex].ClassName
+				
 				if conVarValues.conflictPolicy == 0 then --"do nothing" case...
 					Give(buyer, itemClassName)
+					table.remove(buyableItemTable, itemIndex)
+					
 				elseif conVarValues.conflictPolicy == 1 then --"override" case...
-					local newSlot = buyableItemTable[itemIndex].kind
-					if newSlot < 7 then --I think all items under 7 are unique?
-						local inventoryTable=buyer:GetWeapons()
-						for k, inventoryItem in pairs(inventoryTable) do
-							if inventoryItem:GetSlot() == newSlot then 
-								buyer:StripWeapon(inventoryItem:GetClass())
-							end
-						end
-					end
+					local newItemKind = buyableItemTable[itemIndex].kind
+					StripOldWeapon(buyer, newItemKind)
 					Give(buyer, itemClassName)
-				elseif conVarValues.conflictPolicy == 2 then
-					local newSlot = buyableItemTable[itemIndex].kind
-					if newSlot < 7 then --I think all items under 7 are unique?
-						local inventoryTable=buyer:GetWeapons()
-						for k, inventoryItem in pairs(inventoryTable) do
-							if inventoryItem:GetSlot() == newSlot then 
-								buyer:StripWeapon(inventoryItem:GetClass())
-							end
-							Give(buyer, itemClassName)
-							local updatedBuyableItemTable = {}
-							for k2, buyableItem in pairs(buyableItemTable) do
-								if buyableItem:GetSlot() ~= newSlot then
-									table.insert(updatedBuyableItemTable, buyableItem)
-								end
-							end
-							buyableItemTable = updatedBuyableItemTable
-						end
-					else
-						Give(buyer, itemClassName)
+					table.remove(buyableItemTable, itemIndex)
+					
+				elseif conVarValues.conflictPolicy >= 2 then --"override" case w/ table update...
+					local newItemKind = buyableItemTable[itemIndex].kind
+					StripOldWeapon(buyer, newItemKind)
+					Give(buyer, itemClassName)
+					table.remove(buyableItemTable, itemIndex)
+					if newItemKind < 7 then
+						local updatedBuyableItemTable = UpdateEquipmentTable(buyableItemTable, function(equipment)
+								return equipment.kind ~= newItemKind
+							end)
+						buyableItemTable = updatedBuyableItemTable
 					end
 				end
-				table.remove(buyableItemTable, itemIndex)
 			end
 		end
 	end
