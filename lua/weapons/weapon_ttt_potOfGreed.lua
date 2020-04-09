@@ -13,7 +13,7 @@ SWEP.Kind = WEAPON_EQUIP1
 
 SWEP.CanBuy = { ROLE_TRAITOR, ROLE_DETECTIVE }
 SWEP.InLoadoutFor = nil
-SWEP.LimitedStock = false
+SWEP.LimitedStock = true
 
 if CLIENT then
    -- Path to the icon material
@@ -57,15 +57,51 @@ if SERVER then
 											0, 3)
 end
 
-local function Give(player, itemClassName)
-	local is_item = items.IsItem(itemClassName)
+local function GetSubRoleEquipment(subrole)
+	local equipmentTable = {}
+
+	local itms = items.GetList()
+
+	for i = 1, #itms do
+		local equip = itms[i]
+
+		if not equip.CanBuy or not equip.CanBuy[subrole] then continue end
+
+		equipmentTable[#equipmentTable + 1] = equip
+	end
+
+	local weps = weapons.GetList()
+
+	for i = 1, #weps do
+		local equip = weps[i]
+
+		if not equip.CanBuy or not equip.CanBuy[subrole] then continue end
+
+		equipmentTable[#equipmentTable + 1] = equip
+	end
+
+	return equipmentTable
+end
+
+---
+-- Attempt to give a player an equipment and mark it as bought if successful
+local function Give(player, equipmentClassName)
+	local is_item = items.IsItem(equipmentClassName)
 	if is_item then
-		player:GiveEquipmentItem(itemClassName)
+		local item = player:GiveEquipmentItem(equipmentClassName)
+
+		if item then
+			if isfunction(item.Bought) then
+				item:Bought(player)
+			end
+			player:AddBought(equipmentClassName)
+		end
 	else
-		player:GiveEquipmentWeapon(itemClassName, function(p, c, w)
+		player:GiveEquipmentWeapon(equipmentClassName, function(p, c, w)
 				if isfunction(w.WasBought) then
 					w:WasBought(p)
 				end
+				p:AddBought(c)
 			end)
 	end
 end
@@ -96,56 +132,56 @@ end
 -- Function of the item
 function SWEP:WasBought(buyer)
 	if not IsValid(buyer) then return end
-	local subrole=buyer:GetSubRole()
+	-- Gets the first role ID with a valid shop up the inheritance tree
+	local subrole=GetShopFallback(buyer:GetSubRole())
 	buyer:StripWeapon(self:GetClass())
 	if SERVER then
 		local conVarValues = {}
 		conVarValues.nbItemsToGive = 	GetConVar("ttt_potOfGreed_nbItemsToGive"):GetInt()
 		conVarValues.conflictPolicy = 	GetConVar("ttt_potOfGreed_conflictPolicy"):GetInt()
 		
-		local rd = roles.GetByIndex(subrole)
-		local equipmentTable=rd.fallbackTable
-		local buyableItemTable = {}
+		local equipmentTable = GetSubRoleEquipment(subrole)
 		if(conVarValues.conflictPolicy == 3) then
 			local inventoryTable=buyer:GetWeapons()
-			buyableItemTable = UpdateEquipmentTable(equipmentTable, function(equipment)
+			equipmentTable = UpdateEquipmentTable(equipmentTable, function(equipment)
 					for k, inventoryItem in pairs(inventoryTable) do
 						if inventoryItem.kind == equipment.kind then 
 							return false
 						end
 					end
-					return not equipment.notBuyable and equipment.id ~= "weapon_ttt_potofgreed"
+					local buyable, _, _ = EquipmentIsBuyable(equipment, buyer)
+					return buyable and equipment.id ~= "weapon_ttt_potofgreed"
 				end)
 		else
-			buyableItemTable = UpdateEquipmentTable(equipmentTable, function(equipment)
-					return not equipment.notBuyable and equipment.id ~= "weapon_ttt_potofgreed"
+			equipmentTable = UpdateEquipmentTable(equipmentTable, function(equipment)
+					local buyable, _, _ = EquipmentIsBuyable(equipment, buyer)
+					return buyable and equipment.id ~= "weapon_ttt_potofgreed"
 				end)
 		end
 		for i=1, conVarValues.nbItemsToGive do
-			if #buyableItemTable ~= 0 then
-				local itemIndex = math.random(1, #buyableItemTable)
-				local itemClassName = buyableItemTable[itemIndex].ClassName
+			if #equipmentTable ~= 0 then
+				local itemIndex = math.random(1, #equipmentTable)
+				local itemClassName = equipmentTable[itemIndex].ClassName
 				
 				if conVarValues.conflictPolicy == 0 then --"do nothing" case...
 					Give(buyer, itemClassName)
-					table.remove(buyableItemTable, itemIndex)
+					table.remove(equipmentTable, itemIndex)
 					
 				elseif conVarValues.conflictPolicy == 1 then --"override" case...
-					local newItemKind = buyableItemTable[itemIndex].kind
+					local newItemKind = equipmentTable[itemIndex].kind
 					StripOldWeapon(buyer, newItemKind)
 					Give(buyer, itemClassName)
-					table.remove(buyableItemTable, itemIndex)
+					table.remove(equipmentTable, itemIndex)
 					
 				elseif conVarValues.conflictPolicy >= 2 then --"override" case w/ table update...
-					local newItemKind = buyableItemTable[itemIndex].kind
+					local newItemKind = equipmentTable[itemIndex].kind
 					StripOldWeapon(buyer, newItemKind)
 					Give(buyer, itemClassName)
-					table.remove(buyableItemTable, itemIndex)
+					table.remove(equipmentTable, itemIndex)
 					if newItemKind < 7 then
-						local updatedBuyableItemTable = UpdateEquipmentTable(buyableItemTable, function(equipment)
-								return equipment.kind ~= newItemKind
-							end)
-						buyableItemTable = updatedBuyableItemTable
+						equipmentTable = UpdateEquipmentTable(equipmentTable, function(equipment)
+							return equipment.kind ~= newItemKind
+						end)
 					end
 				end
 			end
